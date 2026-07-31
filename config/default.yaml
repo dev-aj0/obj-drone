@@ -1,0 +1,49 @@
+mavlink:
+  # UART to CoreWing F405 Wing V2 — enable serial on Pi (/dev/serial0)
+  connection: "/dev/serial0"
+  baud: 57600
+  heartbeat_timeout: 30
+  # Outbound SET_POSITION_TARGET rate (Hz); ArduPilot expects steady updates in GUIDED
+  command_rate_hz: 10
+  # Telemetry stream rates requested from the FC on connect
+  telemetry:
+    global_position_hz: 5
+    attitude_hz: 10
+    sys_status_hz: 1
+  # Seconds without heartbeat before companion triggers failsafe
+  link_loss_timeout_s: 3.0
+
+flight:
+  takeoff_altitude_m: 3.0
+  max_horizontal_speed_m_s: 2.0
+  max_vertical_speed_m_s: 1.0
+  position_tolerance_m: 0.5
+  # Minimum GPS satellites for preflight (0 = skip GPS check)
+  min_gps_satellites: 6
+  min_battery_voltage: 10.5
+  # Failsafe when MAVLink link is lost: rtl, land, or loiter
+  link_loss_action: "rtl"
+
+vision:
+  width: 640
+  height: 480
+  fps: 30
+  camera_yaw_offset_deg: 0.0
+  # Color blob tracking — tune with: obj-drone calibrate-color
+  hsv_lower: [0, 120, 70]
+  hsv_upper: [10, 255, 255]
+  min_blob_area: 100
+  # Save annotated frames to logs/frames/ for debugging
+  debug_overlay: false
+  debug_frame_interval: 30
+
+mission:
+  control_rate_hz: 20
+  track_gain: 0.002
+  # Frames target can be missing before declaring lost
+  lost_target_grace_frames: 15
+  lost_target_action: "hover"  # hover | land | rtl
+
+logging:
+  directory: "logs"
+  level: "INFO"

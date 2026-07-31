@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "obj-drone"
+version = "0.1.0"
+description = "ArduPilot companion computer for vision-guided flight"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "pymavlink>=2.4.41",
+    "pyyaml>=6.0",
+    "numpy>=1.24.0",
+    "opencv-python-headless>=4.8.0",
+]
+
+[project.optional-dependencies]
+pi = ["picamera2>=0.3.12"]
+
+[project.scripts]
+obj-drone = "obj_drone.main:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

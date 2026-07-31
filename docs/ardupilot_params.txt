@@ -1,0 +1,33 @@
+# ArduPilot parameters for CoreWing F405 Wing V2 + Raspberry Pi companion (TELEM port)
+#
+# Set these in Mission Planner / QGroundControl / mavproxy for the UART wired to the Pi.
+# Replace "x" with your TELEM port number (e.g. SERIAL2 for TELEM2).
+
+# --- MAVLink on Pi UART ---
+SERIALx_PROTOCOL    2       # MAVLink2
+SERIALx_BAUD        57      # 57600 (match config/default.yaml)
+SERIALx_OPTIONS     0
+
+# --- Companion / GCS ---
+COMPANION_LINK      1       # Enable companion computer features (if available)
+GUID_OPTIONS        0       # Default GUIDED behaviour
+
+# --- Required flight modes (enable in mode switch / FLTMODE params) ---
+# GUIDED  — velocity/position setpoints from Pi
+# LOITER  — hold position
+# LAND    — autonomous land
+# RTL     — return to launch
+
+# --- Failsafes (FC-side; independent of companion) ---
+FS_THR_ENABLE       1       # RC throttle failsafe
+FS_GCS_ENABLE       1       # GCS heartbeat failsafe (optional)
+BATT_LOW_VOLT       10.5    # Match config flight.min_battery_voltage
+
+# --- Pre-arm ---
+ARMING_CHECK        1       # Keep arming checks enabled
+GPS_TYPE            1       # Enable GPS if used for preflight checks
+
+# --- GUIDED velocity (ArduCopter) ---
+# WPNAV_SPEED         200     # Max horizontal speed cm/s (optional cap)
+# WPNAV_SPEED_UP      100
+# WPNAV_SPEED_DN      100

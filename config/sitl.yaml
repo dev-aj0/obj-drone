@@ -1,0 +1,40 @@
+# Simulator profile — run ArduCopter SITL then: obj-drone --config config/sitl.yaml run
+mavlink:
+  connection: "udp:127.0.0.1:14550"
+  baud: 57600
+  heartbeat_timeout: 30
+  command_rate_hz: 10
+  telemetry:
+    global_position_hz: 5
+    attitude_hz: 10
+    sys_status_hz: 1
+  link_loss_timeout_s: 5.0
+
+flight:
+  takeoff_altitude_m: 5.0
+  max_horizontal_speed_m_s: 3.0
+  max_vertical_speed_m_s: 1.5
+  position_tolerance_m: 1.0
+  min_gps_satellites: 0
+  min_battery_voltage: 0.0
+  link_loss_action: "rtl"
+
+vision:
+  width: 640
+  height: 480
+  fps: 30
+  hsv_lower: [0, 120, 70]
+  hsv_upper: [10, 255, 255]
+  min_blob_area: 100
+  debug_overlay: true
+  debug_frame_interval: 15
+
+mission:
+  control_rate_hz: 20
+  track_gain: 0.003
+  lost_target_grace_frames: 30
+  lost_target_action: "hover"
+
+logging:
+  directory: "logs"
+  level: "DEBUG"

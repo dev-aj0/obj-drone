@@ -1,0 +1,17 @@
+[Unit]
+Description=Obj Drone ArduPilot Companion Computer
+After=network.target
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__PROJECT_DIR__
+ExecStart=__PROJECT_DIR__/.venv/bin/obj-drone run
+Restart=on-failure
+RestartSec=5
+# Land on service stop
+KillSignal=SIGINT
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
