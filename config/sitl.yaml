@@ -1,4 +1,6 @@
-# Simulator profile — run ArduCopter SITL then: obj-drone --config config/sitl.yaml run
+# Simulator profile — start ArduCopter SITL (scripts/sitl_test.sh) then:
+#   obj-drone --config config/sitl.yaml test
+#   obj-drone --config config/sitl.yaml run --skip-preflight
 mavlink:
   connection: "udp:127.0.0.1:14550"
   baud: 57600
@@ -8,6 +10,7 @@ mavlink:
     global_position_hz: 5
     attitude_hz: 10
     sys_status_hz: 1
+    gps_raw_hz: 1
   link_loss_timeout_s: 5.0
 
 flight:
@@ -16,6 +19,7 @@ flight:
   max_vertical_speed_m_s: 1.5
   position_tolerance_m: 1.0
   min_gps_satellites: 0
+  require_gps_fix: false
   min_battery_voltage: 0.0
   link_loss_action: "rtl"
 
@@ -23,6 +27,29 @@ vision:
   width: 640
   height: 480
   fps: 30
+  # No CSI camera in the simulator — use a webcam or the colour fallback.
+  camera_backend: "usb"
+  # Autofocus. Modules like the IMX519 boot in MANUAL mode with the lens parked
+  # at 1.0 dioptre (~1 m), so everything else looks blurry until this is set.
+  #   continuous - refocus constantly. Best for bench testing.
+  #   auto       - focus once at startup, then hold. Best in flight: no hunting.
+  #   manual     - fix the lens at lens_position below.
+  focus_mode: "continuous"
+  # Dioptres, used when focus_mode is manual. 0.0 = infinity (normal for flight),
+  # 1.0 = 1 m, 5.0 = 20 cm. Ignored by fixed-focus modules.
+  lens_position: 0.0
+  camera_orientation: "down"
+  max_track_jump_px: 160
+  detector:
+    enabled: false
+    model: "models/yolov8n.onnx"
+    type: "yolo"
+    input_size: 320
+    confidence: 0.5
+    nms_threshold: 0.45
+    labels: "models/coco.names"
+    target_classes: []
+    num_threads: 4
   hsv_lower: [0, 120, 70]
   hsv_upper: [10, 255, 255]
   min_blob_area: 100
@@ -31,9 +58,12 @@ vision:
 
 mission:
   control_rate_hz: 20
-  track_gain: 0.003
+  track_gain: 1.0
+  track_deadband: 0.05
   lost_target_grace_frames: 30
   lost_target_action: "hover"
+  invert_lateral: false
+  invert_longitudinal: false
 
 logging:
   directory: "logs"

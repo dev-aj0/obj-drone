@@ -1,22 +1,21 @@
-# ArduPilot parameters for CoreWing F405 Wing V2 + Raspberry Pi companion (TELEM port)
+# ArduPilot parameters for CoreWing F405 Wing V2 + Raspberry Pi 5 companion
 #
-# Set these in Mission Planner / QGroundControl / mavproxy for the UART wired to the Pi.
-# Replace "x" with your TELEM port number (e.g. SERIAL2 for TELEM2).
+# Set these in Mission Planner / QGroundControl / mavproxy for the UART wired to
+# the Pi. Replace "x" with your TELEM port number (e.g. SERIAL2 for TELEM2).
+#
+# IMPORTANT: this companion software steers with GUIDED velocity setpoints, which
+# fixed-wing ArduPlane ignores. Use ArduCopter, or a QuadPlane flying VTOL.
 
 # --- MAVLink on Pi UART ---
 SERIALx_PROTOCOL    2       # MAVLink2
-SERIALx_BAUD        57      # 57600 (match config/default.yaml)
+SERIALx_BAUD        57      # 57600 (match config/default.yaml mavlink.baud)
 SERIALx_OPTIONS     0
 
-# --- Companion / GCS ---
-COMPANION_LINK      1       # Enable companion computer features (if available)
-GUID_OPTIONS        0       # Default GUIDED behaviour
-
 # --- Required flight modes (enable in mode switch / FLTMODE params) ---
-# GUIDED  — velocity/position setpoints from Pi
-# LOITER  — hold position
-# LAND    — autonomous land
-# RTL     — return to launch
+# ArduCopter : GUIDED, LOITER, LAND, RTL
+# QuadPlane  : GUIDED, QLOITER, QLAND, QRTL
+# The companion resolves these per airframe; `obj-drone test` prints the modes
+# the vehicle actually reports.
 
 # --- Failsafes (FC-side; independent of companion) ---
 FS_THR_ENABLE       1       # RC throttle failsafe
@@ -25,9 +24,21 @@ BATT_LOW_VOLT       10.5    # Match config flight.min_battery_voltage
 
 # --- Pre-arm ---
 ARMING_CHECK        1       # Keep arming checks enabled
-GPS_TYPE            1       # Enable GPS if used for preflight checks
+GPS_TYPE            1       # Enable GPS; preflight requires a 3D fix by default
 
-# --- GUIDED velocity (ArduCopter) ---
-# WPNAV_SPEED         200     # Max horizontal speed cm/s (optional cap)
+# --- GUIDED behaviour (ArduCopter) ---
+# GUID_OPTIONS        0     # Default GUIDED behaviour
+# WPNAV_SPEED         200   # Max horizontal speed cm/s — a useful hard cap that
+#                           # bounds the companion's velocity commands FC-side.
 # WPNAV_SPEED_UP      100
 # WPNAV_SPEED_DN      100
+
+# --- Notes ---
+# * ArduPilot stops following velocity setpoints once they go stale (a few
+#   hundred ms) and holds position. mavlink.command_rate_hz (default 10 Hz)
+#   keeps them fresh.
+# * GUIDED requires a good position estimate. Without GPS lock the vehicle will
+#   refuse to arm or to enter GUIDED.
+# * There is no "COMPANION_LINK" parameter in ArduPilot — an earlier version of
+#   this file listed one. Nothing beyond SERIALx_PROTOCOL/BAUD is needed to
+#   enable a companion computer.

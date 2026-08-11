@@ -1,15 +1,24 @@
 mavlink:
-  # UART to CoreWing F405 Wing V2 — enable serial on Pi (/dev/serial0)
-  connection: "/dev/serial0"
+  # UART to the CoreWing F405 Wing V2.
+  #   USB (FC plugged into the Pi) : /dev/ttyACM0   <-- CURRENTLY IN USE
+  #   Pi 5 GPIO UART               : /dev/ttyAMA0   (needs dtoverlay=uart0-pi5)
+  #   Pi 4 and older GPIO UART     : /dev/serial0   (with dtoverlay=disable-bt)
+  # The TELEM wiring is still physically broken (no signal on GPIO15), so USB is
+  # the working link. Switch back to /dev/ttyAMA0 once TELEM is fixed — you
+  # cannot fly with a USB tether between the FC and the Pi.
+  connection: "/dev/ttyACM0"
   baud: 57600
   heartbeat_timeout: 30
-  # Outbound SET_POSITION_TARGET rate (Hz); ArduPilot expects steady updates in GUIDED
+  # Outbound SET_POSITION_TARGET rate (Hz); ArduPilot expects steady updates in GUIDED.
+  # Setpoints above this rate are dropped, never blocked, so the vision loop never stalls.
   command_rate_hz: 10
   # Telemetry stream rates requested from the FC on connect
   telemetry:
     global_position_hz: 5
     attitude_hz: 10
     sys_status_hz: 1
+    # Required for the satellite count used by preflight
+    gps_raw_hz: 1
   # Seconds without heartbeat before companion triggers failsafe
   link_loss_timeout_s: 3.0
 
@@ -18,8 +27,16 @@ flight:
   max_horizontal_speed_m_s: 2.0
   max_vertical_speed_m_s: 1.0
   position_tolerance_m: 0.5
-  # Minimum GPS satellites for preflight (0 = skip GPS check)
-  min_gps_satellites: 6
+  # ############### BENCH TESTING ONLY — RESTORE BEFORE FLYING ###############
+  # GPS and compass are not connected yet, so these checks are disabled to allow
+  # ground testing. ArduCopter GUIDED mode REQUIRES a position estimate: with no
+  # GPS the vehicle will refuse to arm or enter GUIDED regardless of these
+  # settings, so relaxing them does not make flight possible — it only stops
+  # preflight aborting during bench work.
+  # Restore to: min_gps_satellites: 6, require_gps_fix: true
+  min_gps_satellites: 0
+  require_gps_fix: false
+  # #########################################################################
   min_battery_voltage: 10.5
   # Failsafe when MAVLink link is lost: rtl, land, or loiter
   link_loss_action: "rtl"
@@ -28,21 +45,140 @@ vision:
   width: 640
   height: 480
   fps: 30
-  camera_yaw_offset_deg: 0.0
-  # Color blob tracking — tune with: obj-drone calibrate-color
+  # auto | picamera2 | usb.  Use picamera2 on the aircraft so a broken CSI stack
+  # fails loudly instead of silently flying on some other camera.
+  camera_backend: "picamera2"
+  # Autofocus. Modules like the IMX519 boot in MANUAL mode with the lens parked
+  # at 1.0 dioptre (~1 m), so everything else looks blurry until this is set.
+  #   continuous - refocus constantly. Best for bench testing.
+  #   auto       - focus once at startup, then hold. Best in flight: no hunting.
+  #   manual     - fix the lens at lens_position below.
+  focus_mode: "continuous"
+  # Dioptres, used when focus_mode is manual. 0.0 = infinity (normal for flight),
+  # 1.0 = 1 m, 5.0 = 20 cm. Ignored by fixed-focus modules.
+  lens_position: 0.0
+  # Custom libcamera tuning file. REQUIRED for autofocus on sensors whose stock
+  # Raspberry Pi OS tuning has no rpi.af block (e.g. the Arducam IMX519) —
+  # without it libcamera logs "no AF algorithm" and the lens never moves.
+  # Generate with: bash scripts/enable_autofocus.sh
+  tuning_file: "config/tuning/imx519_af.json"
+  # Physical mounting: "down" (nadir, image top = nose) or "forward".
+  # Set to forward: the test footage shows a forward-looking view of a standing
+  # person, not a downward view. With "forward" the horizontal image error
+  # commands sideways motion and the vertical error commands climb/descent.
+  camera_orientation: "forward"
+  # Largest plausible target movement between frames, in pixels. Detections
+  # further than this from the previous target trigger re-acquisition.
+  max_track_jump_px: 160
+  # How the subject is chosen when nothing is locked yet:
+  #   largest    - biggest box = person nearest the camera. Stand closest to the
+  #                drone and you are the subject. Most reliable; ignores
+  #                bystanders in the background.
+  #   centre     - person nearest the middle of frame: stand in front of it.
+  #   confidence - whatever the detector scored highest. Effectively arbitrary.
+  # You can also click a person in the live view to select them explicitly.
+  acquisition: "largest"
+
+  # --- Neural-network object detection (preferred) ---
+  detector:
+    enabled: true
+    # Run scripts/fetch_model.sh to produce these.
+    model: "models/yolov8n.onnx"
+    type: "yolo"          # yolo | ssd
+    input_size: 320       # 320 is a good speed/accuracy point on a Pi 5 CPU
+    confidence: 0.5
+    nms_threshold: 0.45
+    labels: "models/coco.names"
+    # Only track these classes. Empty list = track any detected class.
+    target_classes: ["person"]
+    num_threads: 4
+
+  # --- HSV colour-blob fallback (used when the detector is disabled) ---
+  # Tune with: obj-drone calibrate-color --save
   hsv_lower: [0, 120, 70]
   hsv_upper: [10, 255, 255]
   min_blob_area: 100
+
   # Save annotated frames to logs/frames/ for debugging
   debug_overlay: false
   debug_frame_interval: 30
 
 mission:
   control_rate_hz: 20
-  track_gain: 0.002
-  # Frames target can be missing before declaring lost
+  # Metres/second commanded when the target sits at the frame edge.
+  # Start low and increase only after a tethered/bench test.
+  track_gain: 1.5
+  # Ignore errors within this fraction of the half-frame (stops hunting)
+  track_deadband: 0.05
+  # Frames the target can be missing before declaring it lost
   lost_target_grace_frames: 15
   lost_target_action: "hover"  # hover | land | rtl
+  # PILOT OVERRIDE: stand down as soon as the flight mode leaves GUIDED, i.e.
+  # the moment you touch the mode switch on the transmitter. The companion will
+  # not resume even if GUIDED is reselected — restart obj-drone to hand control
+  # back. ArduPilot ignores our setpoints outside GUIDED regardless; this stops
+  # the companion silently taking over again.
+  abort_on_mode_change: true
+  # Flip these if the drone moves away from the target instead of toward it.
+  # VERIFY ON THE BENCH WITH PROPS REMOVED.
+  invert_lateral: false
+  invert_longitudinal: false
+
+# --- Follow mode: hold station above and behind ONE person ---
+# The tracker locks onto the FIRST person it sees and keeps that subject for the
+# whole flight; it will not transfer to anyone else, even a closer or more
+# confident detection.
+follow:
+  enabled: true
+  # Horizontal standoff behind the subject, metres.
+  distance_m: 3.0
+  # Altitude held above the launch point. The subject is on the ground, so this
+  # is effectively height above them.
+  height_m: 3.0
+  # Hard floor. The drone has NO obstacle sensing and the thing ahead is a
+  # person — it will back off below this no matter what distance_m says.
+  min_distance_m: 2.0
+  distance_tolerance_m: 0.5
+  altitude_tolerance_m: 0.3
+
+  # --- distance-estimate calibration (measure these!) ---
+  # Distance comes from the apparent height of the person's bounding box via a
+  # pinhole model. Both values MUST be right or standoff will be wrong:
+  #   1. Set person_height_m to the actual subject's height.
+  #   2. Calibrate camera_vfov_deg: stand a known distance away, run
+  #      "obj-drone follow-check", and adjust until the reported range matches.
+  person_height_m: 1.7
+  # Calibrated 2026-07-31 against a measured 3.00 m standoff. Two runs gave
+  # 37.8 and 33.3 degrees; this is their average. The spread comes from the
+  # detector's bounding box varying ~15% with pose at a fixed distance, which
+  # is larger than the calibration error itself — so don't chase a single run.
+  # NOTE: the lens datasheet FOV does not apply. libcamera crops 2560x1440 out
+  # of the 4656x3496 sensor for the 1280x720 mode, then crops again to 4:3, so
+  # the effective FOV is far narrower than the published figure.
+  camera_vfov_deg: 35.5
+
+  # How horizontal error is corrected:
+  #   both   - turn to face the subject AND slide sideways (default; simulation
+  #            showed this tracks curves best while keeping the nose on them)
+  #   yaw    - rotate only. Faces them, but lags a sideways walker
+  #   strafe - slide only, heading never changes
+  lateral_mode: "both"
+  yaw_gain: 1.2
+  max_yaw_rate_deg_s: 45.0
+  strafe_blend: 0.35
+
+  # 1.2 from closed-loop simulation: at 0.6 the drone settled 1.7 m behind a
+  # 1 m/s walker; 1.2 cuts that to 0.8 m with no oscillation.
+  distance_gain: 1.2
+  lateral_gain: 1.5
+  altitude_gain: 0.5
+  # Backing away uses a higher gain than closing: at the normal gain the drone
+  # retreats slower than a person walks and can never open the gap.
+  retreat_gain: 1.5
+  min_retreat_speed_m_s: 0.8
+
+  # Land once the subject has stood still this long, in seconds (0 = never).
+  land_when_stationary_s: 10.0
 
 logging:
   directory: "logs"

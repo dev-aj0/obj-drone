@@ -1,15 +1,24 @@
 [Unit]
+# WARNING: enabling this unit makes the aircraft run preflight, ARM, TAKE OFF and
+# start tracking as soon as the Pi boots, with nobody necessarily ready. Leave it
+# disabled unless that is genuinely what you want, and never enable it while
+# testing. Start it by hand instead:  sudo systemctl start obj-drone
 Description=Obj Drone ArduPilot Companion Computer
 After=network.target
+# The serial device must exist before we try to open it.
+After=dev-ttyAMA0.device
+Wants=dev-ttyAMA0.device
 
 [Service]
 Type=simple
 User=__USER__
+# dialout: serial port. video: CSI camera via libcamera.
+SupplementaryGroups=dialout video
 WorkingDirectory=__PROJECT_DIR__
 ExecStart=__PROJECT_DIR__/.venv/bin/obj-drone run
 Restart=on-failure
 RestartSec=5
-# Land on service stop
+# SIGINT is handled as "stop tracking and land", so give it time to finish.
 KillSignal=SIGINT
 TimeoutStopSec=30
 

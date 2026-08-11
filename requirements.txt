@@ -1,5 +1,11 @@
+# Core runtime dependencies (installed by pip on both Pi and dev machines).
 pymavlink>=2.4.41
+pyserial>=3.5
 pyyaml>=6.0
 numpy>=1.24.0
-opencv-python-headless>=4.8.0
-picamera2>=0.3.12; platform_machine == "aarch64"
+
+# OpenCV is NOT listed here on purpose.
+#   Raspberry Pi OS : sudo apt install python3-opencv python3-picamera2 python3-libcamera
+#                     and create the venv with --system-site-packages
+#   Mac / PC dev    : pip install "opencv-python>=4.8.0,<5.0"
+# OpenCV 5.x removed cv2.TrackerCSRT, so the <5.0 pin matters.

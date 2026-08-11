@@ -8,18 +8,30 @@ version = "0.1.0"
 description = "ArduPilot companion computer for vision-guided flight"
 readme = "README.md"
 requires-python = ">=3.10"
+
+# NOTE: OpenCV, picamera2 and libcamera are deliberately NOT listed here.
+# On Raspberry Pi OS they must come from apt (libcamera has no PyPI wheel), and a
+# pip-installed OpenCV would shadow the apt one inside a --system-site-packages venv.
+# See scripts/install_pi.sh.
 dependencies = [
     "pymavlink>=2.4.41",
+    "pyserial>=3.5",
     "pyyaml>=6.0",
     "numpy>=1.24.0",
-    "opencv-python-headless>=4.8.0",
 ]
 
 [project.optional-dependencies]
-pi = ["picamera2>=0.3.12"]
+# Development on a Mac/PC: OpenCV from PyPI (pinned <5 — OpenCV 5 removed TrackerCSRT).
+dev = [
+    "opencv-python>=4.8.0,<5.0",
+    "pytest>=7.0",
+]
 
 [project.scripts]
 obj-drone = "obj_drone.main:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
