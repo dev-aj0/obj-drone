@@ -212,3 +212,82 @@ def test_unknown_path_is_404(server) -> None:
     with pytest.raises(urllib.error.HTTPError) as exc:
         urllib.request.urlopen(f"{server}/nope", timeout=5)
     assert exc.value.code == 404
+
+
+# ------------------------------------------------------------------- captures
+def _capture_server(tmp_path):
+    """Server with a capture store that saves on every detection."""
+    from http.server import ThreadingHTTPServer
+
+    from obj_drone.capture import CaptureStore
+
+    tracker = TargetTracker(640, 480)
+    frame = draw_bgr_box(make_frame(), RED_BGR, 300, 220, 60, 60)
+    store = CaptureStore(output_dir=tmp_path / "caps", min_interval_s=0.0, min_confidence=0.0)
+    stream = VisionStream(
+        LoopingCamera(frame), tracker, source="color", jpeg_quality=60, captures=store
+    )
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(stream))
+    httpd.daemon_threads = True
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    return f"http://127.0.0.1:{httpd.server_port}", httpd, stream, store
+
+
+def test_capture_endpoints(tmp_path) -> None:
+    import json as _json
+
+    base, httpd, stream, store = _capture_server(tmp_path)
+    try:
+        # Seed a capture directly — the colour path has no Detection objects.
+        store.maybe_capture(make_frame(), [Detection(39, "bottle", 0.9, (1, 1, 10, 10))])
+
+        with urllib.request.urlopen(f"{base}/captures.json", timeout=5) as r:
+            payload = _json.loads(r.read())
+        assert len(payload["captures"]) == 1
+        entry = payload["captures"][0]
+        assert entry["labels"] == ["bottle"]
+
+        # The image itself downloads.
+        with urllib.request.urlopen(f"{base}{entry['url']}", timeout=5) as r:
+            assert r.headers["Content-Type"] == "image/jpeg"
+            assert "attachment" in r.headers["Content-Disposition"]
+            assert r.read().startswith(b"\xff\xd8")
+
+        # And the whole set as a zip.
+        with urllib.request.urlopen(f"{base}/captures.zip", timeout=5) as r:
+            assert r.headers["Content-Type"] == "application/zip"
+            assert r.read()[:2] == b"PK"
+    finally:
+        httpd.shutdown(); httpd.server_close(); stream.stop()
+
+
+def test_unknown_capture_is_404(tmp_path) -> None:
+    base, httpd, stream, _ = _capture_server(tmp_path)
+    try:
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            urllib.request.urlopen(f"{base}/captures/does-not-exist.jpg", timeout=5)
+        assert exc.value.code == 404
+    finally:
+        httpd.shutdown(); httpd.server_close(); stream.stop()
+
+
+def test_capture_path_traversal_is_refused(tmp_path) -> None:
+    base, httpd, stream, store = _capture_server(tmp_path)
+    try:
+        store.maybe_capture(make_frame(), [Detection(39, "bottle", 0.9, (1, 1, 10, 10))])
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            urllib.request.urlopen(f"{base}/captures/..%2F..%2Fetc%2Fpasswd", timeout=5)
+        assert exc.value.code == 404
+    finally:
+        httpd.shutdown(); httpd.server_close(); stream.stop()
+
+
+def test_page_includes_the_gallery(tmp_path) -> None:
+    base, httpd, stream, _ = _capture_server(tmp_path)
+    try:
+        with urllib.request.urlopen(f"{base}/", timeout=5) as r:
+            body = r.read().decode()
+        assert "Detection captures" in body
+        assert "/captures.zip" in body
+    finally:
+        httpd.shutdown(); httpd.server_close(); stream.stop()

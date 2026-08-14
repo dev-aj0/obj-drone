@@ -12,6 +12,7 @@ import time
 from obj_drone.config import (
     VisionConfig,
     build_detector,
+    capture_config_from_dict,
     follow_config_from_dict,
     load_config,
     logging_config_from_dict,
@@ -327,9 +328,11 @@ def cmd_serve(
     lens: float | None = None,
 ) -> int:
     """Serve the live annotated camera feed over HTTP. No MAVLink, no flight."""
+    from obj_drone.capture import CaptureStore
     from obj_drone.web import VisionStream, serve
 
     tracker, vision_cfg = build_tracker(cfg, with_detector=source != "color")
+    cap_cfg = capture_config_from_dict(cfg)
 
     focus_mode = focus or vision_cfg.focus_mode
     lens_position = vision_cfg.lens_position
@@ -364,6 +367,14 @@ def cmd_serve(
             jpeg_quality=quality,
             mission_config=mission_config_from_dict(cfg),
             follow_config=follow_config_from_dict(cfg),
+            captures=CaptureStore(
+                output_dir=resolve_path(cap_cfg.directory),
+                enabled=cap_cfg.enabled,
+                min_interval_s=cap_cfg.min_interval_s,
+                min_confidence=cap_cfg.min_confidence,
+                max_captures=cap_cfg.max_captures,
+                jpeg_quality=cap_cfg.jpeg_quality,
+            ),
         )
         serve(stream, host=host, port=port)
         return 0

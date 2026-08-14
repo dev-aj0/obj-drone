@@ -79,6 +79,16 @@ class VisionConfig:
 
 
 @dataclass
+class CaptureConfig:
+    enabled: bool
+    directory: str
+    min_interval_s: float
+    min_confidence: float
+    max_captures: int
+    jpeg_quality: int
+
+
+@dataclass
 class LoggingConfig:
     directory: str
     level: str
@@ -211,6 +221,18 @@ def vision_config_from_dict(cfg: dict[str, Any]) -> VisionConfig:
         debug_overlay=v.get("debug_overlay", False),
         debug_frame_interval=v.get("debug_frame_interval", 30),
         detector=detector_config_from_dict(cfg),
+    )
+
+
+def capture_config_from_dict(cfg: dict[str, Any]) -> CaptureConfig:
+    c = cfg.get("capture", {})
+    return CaptureConfig(
+        enabled=c.get("enabled", True),
+        directory=c.get("directory", "logs/captures"),
+        min_interval_s=c.get("min_interval_s", 2.0),
+        min_confidence=c.get("min_confidence", 0.45),
+        max_captures=c.get("max_captures", 300),
+        jpeg_quality=c.get("jpeg_quality", 90),
     )
 
 

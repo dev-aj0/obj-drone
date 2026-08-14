@@ -1,0 +1,112 @@
+# Litter-detection profile for the hackathon demo.
+#
+#   obj-drone --config config/trash.yaml serve
+#
+# Detects trash instead of people, and saves an annotated still every time it
+# sees something — proof images for the demo, downloadable from the web page.
+#
+# Follow mode is OFF. A litter survey should fly a pattern and log what it
+# finds, not chase a stationary bottle. It also means this profile needs no
+# flight controller at all: run it on the bench, or carry the Pi around.
+
+mavlink:
+  # Only used if you run a MAVLink command. `serve` and `detect` never connect.
+  connection: "/dev/ttyACM0"
+  baud: 57600
+  heartbeat_timeout: 30
+  command_rate_hz: 10
+  telemetry:
+    global_position_hz: 5
+    attitude_hz: 10
+    sys_status_hz: 1
+    gps_raw_hz: 1
+  link_loss_timeout_s: 3.0
+
+flight:
+  takeoff_altitude_m: 3.0
+  max_horizontal_speed_m_s: 2.0
+  max_vertical_speed_m_s: 1.0
+  position_tolerance_m: 0.5
+  min_gps_satellites: 0
+  require_gps_fix: false
+  min_battery_voltage: 10.5
+  link_loss_action: "rtl"
+
+vision:
+  width: 640
+  height: 480
+  fps: 30
+  camera_backend: "picamera2"
+  camera_orientation: "down"
+
+  # Litter is usually below the drone and close, so autofocus earns its keep.
+  focus_mode: "continuous"
+  lens_position: 0.0
+  tuning_file: "config/tuning/imx519_af.json"
+
+  max_track_jump_px: 160
+  # Biggest box = nearest item. For a survey this only affects which single
+  # item gets highlighted green; every detection is still boxed and captured.
+  acquisition: "largest"
+
+  detector:
+    enabled: true
+    model: "models/yolov8n.onnx"
+    type: "yolo"
+    input_size: 320
+    # Lower than the person default: litter is small in frame and partly
+    # occluded by grass, so scores run lower. Raise it if you get false hits.
+    confidence: 0.35
+    nms_threshold: 0.45
+    labels: "models/coco.names"
+    # COCO classes that show up as litter. The model was never trained on
+    # "trash" as a category — these are the everyday objects it does know that
+    # end up as litter. Crushed cans and wrappers will be MISSED; fine-tune on
+    # the TACO litter dataset if you need those.
+    target_classes:
+      - "bottle"
+      - "cup"
+      - "wine glass"
+      - "bowl"
+      - "banana"
+      - "apple"
+      - "orange"
+    num_threads: 4
+
+  hsv_lower: [0, 120, 70]
+  hsv_upper: [10, 255, 255]
+  min_blob_area: 100
+  debug_overlay: false
+  debug_frame_interval: 30
+
+# --- Proof images ---
+# Every confident detection saves an annotated still, rate-limited so you get
+# distinct shots rather than 15 near-identical frames a second. Browse and
+# download them from the live page.
+capture:
+  enabled: true
+  directory: "logs/captures"
+  # Seconds between saves. Lower for a fast demo, higher for a long survey.
+  min_interval_s: 2.0
+  min_confidence: 0.45
+  # Stops a long run filling the SD card.
+  max_captures: 300
+  jpeg_quality: 90
+
+# Survey mode: fly a pattern and log, don't chase the litter.
+follow:
+  enabled: false
+
+mission:
+  control_rate_hz: 20
+  track_gain: 1.5
+  track_deadband: 0.05
+  lost_target_grace_frames: 15
+  lost_target_action: "hover"
+  abort_on_mode_change: true
+  invert_lateral: false
+  invert_longitudinal: false
+
+logging:
+  directory: "logs"
+  level: "INFO"

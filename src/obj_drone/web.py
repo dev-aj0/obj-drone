@@ -21,6 +21,7 @@ from typing import Any
 
 import cv2
 
+from obj_drone.capture import CaptureStore
 from obj_drone.controller.follow import FollowConfig, follow_velocity
 from obj_drone.controller.mission import MissionConfig, velocity_for
 from obj_drone.vision.camera import Camera
@@ -48,6 +49,7 @@ class VisionStream:
         jpeg_quality: int = 80,
         mission_config: MissionConfig | None = None,
         follow_config: FollowConfig | None = None,
+        captures: CaptureStore | None = None,
     ) -> None:
         self.camera = camera
         self.tracker = tracker
@@ -57,6 +59,7 @@ class VisionStream:
         # ever sent to the flight controller from this viewer.
         self.mission_config = mission_config or MissionConfig()
         self.follow_config = follow_config
+        self.captures = captures
 
         self._cond = threading.Condition()
         self._jpeg: bytes | None = None
@@ -114,6 +117,9 @@ class VisionStream:
             velocity = self._would_command(result)
             annotated = annotate_frame(frame, result, err, detections)
 
+            if self.captures is not None and detections:
+                self.captures.maybe_capture(annotated, detections)
+
             ok, buf = cv2.imencode(
                 ".jpg", annotated, [int(cv2.IMWRITE_JPEG_QUALITY), self.jpeg_quality]
             )
@@ -147,6 +153,7 @@ class VisionStream:
                 if self._last_distance is not None
                 else None,
                 "too_close": self._last_too_close,
+                "captures": self.captures.count if self.captures is not None else 0,
                 **self._focus_info(),
             }
 
@@ -254,6 +261,24 @@ PAGE = """<!doctype html>
   td:first-child { color:#8b949e; }
   td:last-child { text-align:right; font-variant-numeric:tabular-nums; }
   .note { margin-top:1rem; font-size:.75rem; color:#6e7681; }
+  .shots { margin-top:1.5rem; }
+  .shots h2 { font-size:.95rem; margin:0 0 .5rem; font-weight:600; }
+  .bar { display:flex; gap:.5rem; align-items:center; margin-bottom:.75rem; flex-wrap:wrap; }
+  .btn {
+    background:#21262d; color:#e6edf3; border:1px solid #30363d; border-radius:7px;
+    padding:.45rem .8rem; font-size:.8rem; cursor:pointer; text-decoration:none;
+    display:inline-block; font-family:inherit;
+  }
+  .btn:hover { background:#30363d; }
+  .btn.primary { background:#238636; border-color:#2ea043; color:#fff; }
+  .btn.primary:hover { background:#2ea043; }
+  .count { color:#8b949e; font-size:.8rem; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:.6rem; }
+  .shot { border:1px solid #30363d; border-radius:8px; overflow:hidden; background:#161b22; }
+  .shot img { width:100%; display:block; aspect-ratio:4/3; object-fit:cover; }
+  .shot .meta { padding:.35rem .5rem; font-size:.68rem; color:#8b949e; line-height:1.35; }
+  .shot .meta b { color:#3fb950; }
+  .empty { color:#6e7681; font-size:.8rem; padding:1rem 0; }
 </style>
 </head>
 <body>
@@ -292,6 +317,22 @@ PAGE = """<!doctype html>
       the scene has no detail to focus on — aim at something textured.<br><br>
       Green box = locked target. Grey = other detections.
       Line runs from frame centre to target — that offset is what drives the velocity command.</div>
+    </div>
+  </div>
+
+  <div class="shots">
+    <h2>Detection captures</h2>
+    <div class="bar">
+      <a class="btn primary" href="/captures.zip" download>Download all (.zip)</a>
+      <a class="btn" href="/snapshot.jpg" download>Save current frame</a>
+      <button class="btn" id="clear">Clear</button>
+      <span class="count" id="shotcount">0 saved</span>
+    </div>
+    <div class="grid" id="grid"></div>
+    <div class="empty" id="empty">
+      No captures yet — point the camera at a bottle. Frames are saved
+      automatically, rate-limited so you get distinct shots rather than hundreds
+      of duplicates. Click any thumbnail to download it.
     </div>
   </div>
 <script>
@@ -337,8 +378,35 @@ async function poll() {
     $("badgetext").textContent = "DISCONNECTED";
   }
 }
+let lastCount = -1;
+async function loadShots(force) {
+  try {
+    const r = await fetch("/captures.json", { cache: "no-store" });
+    const { captures } = await r.json();
+    if (!force && captures.length === lastCount) return;
+    lastCount = captures.length;
+
+    $("shotcount").textContent = captures.length + " saved";
+    $("empty").style.display = captures.length ? "none" : "block";
+    $("grid").innerHTML = captures.map(c => `
+      <a class="shot" href="${c.url}" download title="Click to download">
+        <img src="${c.url}" alt="${c.labels.join(', ')}" loading="lazy">
+        <div class="meta"><b>${c.labels.join(', ')}</b> ${(c.confidence*100).toFixed(0)}%<br>
+        ${c.count} object${c.count === 1 ? '' : 's'} &middot; ${c.when}</div>
+      </a>`).join("");
+  } catch (e) { /* server not up yet */ }
+}
+
+$("clear").addEventListener("click", async () => {
+  if (!confirm("Delete all saved captures?")) return;
+  await fetch("/captures/clear", { method: "POST" });
+  loadShots(true);
+});
+
 poll();
+loadShots(true);
 setInterval(poll, 250);
+setInterval(loadShots, 2000);
 </script>
 </body>
 </html>
@@ -356,6 +424,19 @@ def make_handler(stream: VisionStream) -> type[BaseHTTPRequestHandler]:
             self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
             self.send_header("Pragma", "no-cache")
 
+        def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
+            if self.path.split("?", 1)[0] == "/captures/clear":
+                removed = stream.captures.clear() if stream.captures else 0
+                body = json.dumps({"deleted": removed}).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self._no_store()
+                self.end_headers()
+                self.wfile.write(body)
+            else:
+                self.send_error(404)
+
         def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
             path = self.path.split("?", 1)[0]
             if path in ("/", "/index.html"):
@@ -366,6 +447,12 @@ def make_handler(stream: VisionStream) -> type[BaseHTTPRequestHandler]:
                 self._send_status()
             elif path == "/snapshot.jpg":
                 self._send_snapshot()
+            elif path == "/captures.json":
+                self._send_capture_list()
+            elif path == "/captures.zip":
+                self._send_capture_zip()
+            elif path.startswith("/captures/"):
+                self._send_capture(path[len("/captures/") :])
             else:
                 self.send_error(404)
 
@@ -398,6 +485,45 @@ def make_handler(stream: VisionStream) -> type[BaseHTTPRequestHandler]:
             self._no_store()
             self.end_headers()
             self.wfile.write(jpeg)
+
+        def _send_capture_list(self) -> None:
+            items = [c.as_dict() for c in stream.captures.list()] if stream.captures else []
+            body = json.dumps({"captures": items}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self._no_store()
+            self.end_headers()
+            self.wfile.write(body)
+
+        def _send_capture(self, name: str) -> None:
+            # Looked up by exact recorded name, so a crafted path cannot escape
+            # the captures directory.
+            capture = stream.captures.get(name) if stream.captures else None
+            if capture is None or not capture.path.is_file():
+                self.send_error(404)
+                return
+            data = capture.path.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "image/jpeg")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Content-Disposition", f'attachment; filename="{capture.name}"')
+            self._no_store()
+            self.end_headers()
+            self.wfile.write(data)
+
+        def _send_capture_zip(self) -> None:
+            if stream.captures is None or stream.captures.count == 0:
+                self.send_error(404, "No captures yet")
+                return
+            data = stream.captures.as_zip()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/zip")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Content-Disposition", 'attachment; filename="detections.zip"')
+            self._no_store()
+            self.end_headers()
+            self.wfile.write(data)
 
         def _send_stream(self) -> None:
             self.send_response(200)
