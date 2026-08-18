@@ -39,10 +39,12 @@ vision:
   camera_backend: "picamera2"
   camera_orientation: "down"
 
-  # Litter is usually below the drone and close, so autofocus earns its keep.
-  focus_mode: "continuous"
+  # The camera in CAM0 is an IMX219 (Camera Module V2), which is FIXED FOCUS —
+  # there is no lens to move, so focus settings are ignored. The IMX519
+  # autofocus tuning file does not apply to this sensor and must not be loaded.
+  focus_mode: "manual"
   lens_position: 0.0
-  tuning_file: "config/tuning/imx519_af.json"
+  tuning_file: null
 
   max_track_jump_px: 160
   # Biggest box = nearest item. For a survey this only affects which single
